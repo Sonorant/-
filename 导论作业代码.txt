@@ -1,0 +1,225 @@
+#define leftA_PIN 3
+#define leftB_PIN 6
+#define rightA_PIN 10
+#define rightB_PIN 11
+
+#define BLINKER_BLE
+
+#include <Blinker.h>
+//以下几个是按钮控制部分
+//Number用于获取数据，button对应着函数,按下后触发对应函数，此时number不会计数。
+BlinkerButton Button1("btn-abc");//控制arduinoLED灯，测试蓝牙是否连接成功
+BlinkerNumber Number1("num-abc");//用于计数。
+//app中还有一个在编译器中未经定义的button-NULL,按下时number会对其计数，用于改变counter以控制行进/停止。
+BlinkerButton Button2("btn-speed");//速度档位。
+BlinkerButton Button3("btn-L");//左拐
+BlinkerButton Button4("btn-R");//右拐
+int counter = 0;
+/////////////////////////////////
+int a=1;//速度档位
+void forward()
+{
+  //forward 前进
+     analogWrite(leftA_PIN,75+30*a); //给较高电平
+     analogWrite(leftB_PIN,10); //给较低电平
+     analogWrite(rightA_PIN,75+30*a); //给较高电平
+     analogWrite(rightB_PIN,10); //给较低电平
+  }
+  void sto()
+  {
+     analogWrite(leftA_PIN,0); //给低电平
+     analogWrite(leftB_PIN,0); //给低电平
+     analogWrite(rightA_PIN,0);//给低电平
+     analogWrite(rightB_PIN,0);//给低电平
+    }
+void left()//左慢右快
+{
+  analogWrite(leftA_PIN,75+20*a); 
+     analogWrite(leftB_PIN,10); 
+     analogWrite(rightA_PIN,75+30*a);
+     analogWrite(rightB_PIN,10); 
+  }
+  void right()//左快右慢
+{
+  analogWrite(leftA_PIN,75+30*a); 
+     analogWrite(leftB_PIN,10); 
+     analogWrite(rightA_PIN,75+20*a);
+     analogWrite(rightB_PIN,10); 
+  }
+  /////////////////////////////////////////
+void button1_callback(const String & state)//灯
+{
+    BLINKER_LOG("get button state: ", state);
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+}
+void button2_callback(const String & state)//升档
+{
+    BLINKER_LOG("get button state: ", state);
+    if(a<6)
+    a++;//75+6*30=255,防止误操作爆掉= =
+}
+void button3_callback(const String & state)//降档
+{
+    BLINKER_LOG("get button state: ", state);
+    if(a>1)
+    a--;//同上
+}
+void button4_callback(const String & state)//左
+{
+    BLINKER_LOG("get button state: ", state);
+    left();//左
+}
+void button5_callback(const String & state)//右
+{
+    BLINKER_LOG("get button state: ", state);
+    right();//右
+}
+void dataRead(const String & data)
+{
+    BLINKER_LOG("Blinker readString: ", data);
+    counter++;
+    Number1.print(counter);
+}
+
+/**********************************/
+ 
+#include "Arduino.h"
+#include "SoftwareSerial.h"
+#include "DFRobotDFPlayerMini.h"
+ 
+SoftwareSerial mySoftwareSerial(8, 9); // RX, TX
+DFRobotDFPlayerMini myDFPlayer;
+void printDetail(uint8_t type, int value);
+ 
+void setup()
+{
+
+  ///////////////////////////////
+  //初始化各IO,模式为OUTPUT 输出模式
+pinMode(leftA_PIN,OUTPUT);
+pinMode(leftB_PIN,OUTPUT);
+pinMode(rightA_PIN,OUTPUT);
+pinMode(rightB_PIN,OUTPUT);
+//默认电机停止转动，全部设为低电平
+digitalWrite(leftA_PIN,LOW);
+digitalWrite(leftB_PIN,LOW);
+digitalWrite(rightA_PIN,LOW);
+digitalWrite(rightB_PIN,LOW);
+////////////////////////////////////以下为mp3部分///////
+
+  mySoftwareSerial.begin(9600);
+  Serial.begin(115200);
+   
+  Serial.println();
+  Serial.println(F("UltiRobot Mp3Player Demo"));
+  Serial.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
+   
+  if (!myDFPlayer.begin(mySoftwareSerial)) {  //Use softwareSerial to communicate with mp3.
+    Serial.println(F("Unable to begin:"));
+    Serial.println(F("1.Please recheck the connection!"));
+    Serial.println(F("2.Please insert the SD card!"));
+    while(true){
+      delay(0); // Code to compatible with ESP8266 watch dog.
+    }
+  }
+  Serial.println(F("MP3Player online."));
+   
+  myDFPlayer.volume(10);  //Set volume value. From 0 to 30
+
+  /*********************************************/
+  BLINKER_DEBUG.stream(Serial);
+    
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, HIGH);
+    
+    Blinker.begin();
+    Blinker.attachData(dataRead);
+
+    Button1.attach(button1_callback);
+    Blinker.begin(4, 5); // 设置数字IO 4(RX) 5(TX), 默认波特率 9600 bps 
+ 
+}
+
+  int x=0,y=1;
+void loop()
+{
+  //counter初始为1，奇数时停止，偶数时调用forword（）并播放音乐。期间可用app上的按键来调用档位、方向函数。本来用wait，但在wait期间按键无法响应，故将原来的“播放第一首”改为“从暂停处重新开始播放”，否则每次loop都会从开头播放音乐。
+  Blinker.run();
+  if(counter%2!=0)
+  {
+  myDFPlayer.start();  //从暂停处重新开始播放
+  forward();
+//等待button-NULL以改变行为
+  }
+  else
+  {
+    sto();
+    myDFPlayer.pause();  //暂停播放
+    }
+   
+  if (myDFPlayer.available()) {
+    printDetail(myDFPlayer.readType(), myDFPlayer.read()); //Print the detail message from DFPlayer to handle different errors and states.
+  }
+}
+ 
+void printDetail(uint8_t type, int value){
+  switch (type) {
+    case TimeOut:
+      Serial.println(F("Time Out!"));
+      break;
+    case WrongStack:
+      Serial.println(F("Stack Wrong!"));
+      break;
+    case DFPlayerCardInserted:
+      Serial.println(F("Card Inserted!"));
+      break;
+    case DFPlayerCardRemoved:
+      Serial.println(F("Card Removed!"));
+      break;
+    case DFPlayerCardOnline:
+      Serial.println(F("Card Online!"));
+      break;
+    case DFPlayerUSBInserted:
+      Serial.println("USB Inserted!");
+      break;
+    case DFPlayerUSBRemoved:
+      Serial.println("USB Removed!");
+      break;
+    case DFPlayerPlayFinished:
+      Serial.print(F("Number:"));
+      Serial.print(value);
+      Serial.println(F(" Play Finished!"));
+      break;
+    case DFPlayerError:
+      Serial.print(F("DFPlayerError:"));
+      switch (value) {
+        case Busy:
+          Serial.println(F("Card not found"));
+          break;
+        case Sleeping:
+          Serial.println(F("Sleeping"));
+          break;
+        case SerialWrongStack:
+          Serial.println(F("Get Wrong Stack"));
+          break;
+        case CheckSumNotMatch:
+          Serial.println(F("Check Sum Not Match"));
+          break;
+        case FileIndexOut:
+          Serial.println(F("File Index Out of Bound"));
+          break;
+        case FileMismatch:
+          Serial.println(F("Cannot Find File"));
+          break;
+        case Advertise:
+          Serial.println(F("In Advertise"));
+          break;
+        default:
+          break;
+      }
+      break;
+    default:
+      break;
+  }
+   
+}
